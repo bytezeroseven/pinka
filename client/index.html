@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pinka.io</title>
+    <style>
+    * {
+        box-sizing: border-box;
+    }
+    body {
+      padding: 0;
+      margin: 0;
+      overflow: hidden;
+      font-family: Arial;
+    }
+
+    h2 {
+      font-size: 32px;
+      font-weight: 500;
+      text-align: center;
+    }
+
+    p {
+        color: #444;
+    }
+
+    #overlay {
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      position:absolute;
+      background: rgba(0, 0, 0, 0.8);
+      transition: 0.1s;
+    }
+
+    #container {
+      width: 300px;
+      background: #fff;
+      border-radius: 15px;
+      padding: 5px 15px;
+      margin: 100px auto;
+    }
+
+    #nickInput {
+      border-radius: 5px;
+      padding: 10px 15px;
+      border: 1px solid #ddd;
+      outline: 0;
+      font-size: 14px;
+      width: 100%;
+    }
+
+    #nickInput:focus {
+      border: 1px solid #999;
+    }
+
+
+    #playButton {
+      background: #3F51B5;
+      color: white;
+      border-radius: 5px;
+      padding: 10px 15px;
+      border: 0;
+      outline: 0;
+      width: 100%;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+
+    #playButton:active {
+      background: #35428a;
+    }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="overlay">
+        <div id="container">
+          <h2>Hello!</h2>
+          <p>Type a nick below or leave it empty.</p>
+        <input type="text" id="nickInput" placeholder="Nick" maxlength="14">
+          <button id="playButton">Play</button>
+          <hr>
+          <center><p>spacebar for split<br>w for eject</p></center>
+        </div>
+    </div>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="skins.js"></script>
+    <script>
+        var cvs = document.getElementById("gameCanvas");
+        var width = innerWidth,
+            height = innerHeight;
+        cvs.height = height;
+        cvs.width = width;
+
+        var ctx = cvs.getContext("2d");
+        ctx.imageSmoothingQuality = "high";
+
+        var socket = io();
+
+        socket.emit("width and height", {
+            w: width,
+            h: height
+        });
+
+
+
+        var blobs = [];
+        function drawBlob(b) {
+
+            var r = b.size;
+
+            ctx.save();
+            ctx.translate(b.x, b.y);
+
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI * 2);
+            ctx.closePath();
+
+            ctx.fillStyle = "hsl(" + b.hue + ", 100%, 60%)";
+            //ctx.strokeStyle = "hsl(" + b.hue + ", 100%, 50%)";
+            //ctx.strokeStyle = "#000";
+            //ctx.lineWidth = 10;
+
+            ctx.fill();
+            //ctx.stroke();
+            ctx.restore();
+
+            
+            if(b.nick) {
+                drawSkin(b);
+            } else {
+                return;
+            }
+
+            
+
+            ctx.save();
+            ctx.translate(b.x, b.y);
+            var size = b.size;
+
+            ctx.fillStyle = "white";
+            ctx.textBaseline = "middle";
+            ctx.textAlign = "center";
+
+
+            var fontsize = size * 0.34;
+            do {
+                fontsize--;
+                ctx.font = fontsize + "px Arial";
+            } while(ctx.measureText(b.nick).width > size * 1.86)
+
+            ctx.strokeStyle = 'black';
+            ctx.lineWidth = size * 0.04;
+
+            ctx.strokeText(b.nick, 0, 0);
+            ctx.fillText(b.nick, 0, 0);
+
+
+            
+
+            // ctx.font = size * 0.40 + "px Arial";
+            // ctx.lineWidth = size * 0.09;
+            // ctx.strokeText(Math.floor(this.mass), 0, 0.79 * size);
+            // ctx.fillText(Math.floor(this.mass), 0, 0.79 * size);
+
+            ctx.restore();
+        };
+
+        var skinArr = skins.split("\n");
+
+        function drawSkin(b) {
+            if(skinArr.indexOf(b.nick.toUpperCase()) == -1) {
+                return;
+            }
+            var r = b.size;
+            var skin = new Image();
+
+            skin.src = "http://agarioskins.com/img/skin/" + b.nick + ".png";
+
+            ctx.save();
+            ctx.translate(b.x, b.y);
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI * 2);
+            ctx.closePath();
+                
+            ctx.clip();
+            ctx.drawImage(skin, -r, -r, r * 2, r * 2);
+            ctx.restore();
+            
+        }
+
+        window.addEventListener("mousemove", function(e) {
+            socket.emit("input mouse", {
+                clientX: e.clientX,
+                clientY: e.clientY
+            });
+        });
+
+        var pressed = false;
+        window.addEventListener("keydown", function(e) {
+            if(!pressed) {
+                pressed = true;
+            } else {
+                return;
+            }
+            socket.emit("input keydown", {
+                keyCode: e.keyCode
+            });
+        });
+        window.addEventListener("keyup", function(e) {
+            pressed = false;
+            socket.emit("input keyup", {
+                keyCode: e.keyCode
+            });
+        });
+
+
+
+        socket.on("update blobs", function(data) {
+            blobs = data;
+        });
+
+
+        var tX = 0;
+        var tY = 0;
+        var z = 0.4;
+
+        socket.on("center and zoom", function(d) {
+            tX = d.centerX;
+            tY = d.centerY;
+            z = d.zoom;
+        });
+
+        socket.on("dead", function() {
+            document.getElementById("overlay").style.display = "block";
+        });
+
+        socket.on("joined", function() {
+            document.getElementById("overlay").style.display = "none";
+        });
+
+
+        var play = document.getElementById("playButton");
+        
+        var nickInput = document.getElementById("nickInput");
+        play.onclick = function() {
+            var nick = nickInput.value;
+
+            if(nick != "") {
+                document.getElementById("overlay").style.display = "none";
+
+                socket.emit("join game", {
+                    nick: nick,
+                });
+            }
+
+        };
+
+        
+
+        var leaders = [];
+
+        socket.on("leaders", function(d) {
+            leaders = d;
+        });
+
+        
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            ctx.save();
+        
+
+            ctx.translate(-tX, -tY);
+            ctx.scale(z, z);
+
+            function gridPattern() {
+                var c = document.createElement("canvas");
+                c.width = 128;
+                c.height = 128;
+                c.ctx = c.getContext("2d");
+                c.ctx.fillStyle = "#000";
+                c.ctx.globalAlpha = 0.1;
+                c.ctx.fillRect(0, c.width/2, c.width, 5);
+                c.ctx.fillRect(c.width/2, 0, 5, c.width);
+                return ctx.createPattern(c, "repeat");
+            };  
+
+            ctx.fillStyle = gridPattern();
+            ctx.fillRect(
+                (tX + width/2)/z - 2500, (tY + height/2)/z - 2500,
+                5000, 
+                5000);
+
+
+            blobs = blobs.sort(function(a, b) {
+                return a.size - b.size;
+            });
+
+            for(var i in blobs) {
+                var b = blobs[i];
+                drawBlob(b);
+            }
+
+            ctx.restore();
+
+
+            var w = 160;
+            var p = 10;
+
+            ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+            ctx.fillRect(width - w - p, p, w, 255);
+
+            
+            ctx.fillStyle = "white";
+            ctx.textBaseline = "top";
+            ctx.textAlign = "center";
+
+            var tp = 20;
+
+            ctx.font = "24px Arial";
+            ctx.fillText("Leaderboard", width - w/2 - p, tp);
+
+
+            ctx.font = "17px Arial";
+            for(var i = 0; i < leaders.length; i++)  {
+                var l = leaders[i];
+                ctx.fillText(i + 1 + ". " + l, width - w/2 - p, 50 + i * tp);
+            };
+                
+            ctx.fillStyle = "white";
+            ctx.textBaseline = "middle";
+            ctx.textAlign = "left";
+
+
+            requestAnimationFrame(draw);
+        };
+
+        draw();
+    </script>
+    
+</body>
+</html>

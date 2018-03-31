@@ -1,0 +1,15 @@
+{
+  "name": "your-game-name-here",
+  "version": "1.0.0",
+  "description": "Game description here",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "author": "Your Name",
+  "dependencies": {
+    "express": "^4.13.0",
+    "socket.io": "^1.3.5"
+  }
+}
