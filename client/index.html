@@ -70,10 +70,63 @@
     #playButton:active {
       background: #35428a;
     }
+    
+
+    #chatArea {
+        width: 260px;
+        height: 320px;
+        bottom: 0;
+        left: 0;
+        position: absolute;
+        background: rgba(255, 255, 255, 0.6);
+    }
+
+    #chatBox {
+        height: 280px;
+        list-style: none;
+        padding-left: 5px;
+        overflow: hidden;
+        margin: 0;
+        margin-left: 5px;
+    }
+
+    #chatBox li {
+        margin: 5px;
+        padding: 2px;
+    }
+
+    #msg {
+        bottom: 0;
+        position: absolute;
+        width: 100%;
+        border: 0;
+        border-top: 1px solid #ddd;
+        padding: 10px;
+        outline: 0;
+    }
+
+    .game {
+        font-style: italic;
+        color: #673AB7;
+    }
+    .game::before {
+        content: "» ";
+    }
+
+    .client .nick {
+        color: #f44336;
+    }
     </style>
 </head>
 <body>
     <canvas id="gameCanvas"></canvas>
+    <div id="chatArea">
+        <ul id="chatBox">
+            <li class="game">Welcome to Pinka.IO!</li>
+            
+        </ul>
+        <input type="text" id="msg">
+    </div>
     <div id="overlay">
         <div id="container">
             <h2>Hello!</h2>
@@ -104,6 +157,24 @@
 
 
 
+        var chatBox = document.getElementById("chatBox");
+        var msg = document.getElementById("msg");
+        msg.onkeydown = function(e) {
+            var key = e.keyCode;
+            var m = this.value;
+            if(key == 13 && m.trim() != "") {
+                socket.emit("msg", m);
+                this.value = "";
+            }
+        };
+
+        socket.on("msg", addMsg);
+
+        function addMsg(arr) {
+            chatBox.innerHTML += `<li class="${arr[0]}">
+                <span class="nick">${arr[1]}</span> ${arr[2]}</li>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+        };
 
 
 
@@ -223,6 +294,15 @@
 
         var pressed = false;
         window.addEventListener("keydown", function(e) {
+            if(e.keyCode == 13) {
+                msg.focus();
+                return;
+            }
+
+            if(e.target == msg) {
+                return;
+            }
+
             if(!pressed) {
                 pressed = true;
             } else {
@@ -369,7 +449,8 @@
         }; 
 
         function draw() {
-            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = "#f2fbff";
+            ctx.fillRect(0, 0, width, height);
 
             ctx.save();
     

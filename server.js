@@ -275,7 +275,7 @@ Player.prototype.setNick = function(n) {
 	this.nick = n;
 };
 Player.prototype.getNick = function() {
-	return this.nick;
+	return this.nick == "" ? "Unnamed" : this.nick;
 };
 Player.prototype.onMouseMove = function(x, y) {
 	this.rawMouseX = x;
@@ -349,6 +349,7 @@ Player.prototype.updateCenter = function(delta) {
 			}
 		});
 	});
+
 	this.movingVisibleNodes = nodes.filter(function(n) {
 		return n.nodeType == 0 || n.nodeType == 1 || n.nodeType == 3;
 	});
@@ -363,12 +364,12 @@ function Server() {
 	this.players = [];
 
 	this.config = {
-		virusMaxMass: 200,
+		virusMaxMass: 180,
 		virusMass: 100,
 		ejectMass: 10,
 		foodMass: 5,
 
-		playerStartMass: 100,
+		playerStartMass: 1000,
 		playerMinMassForSplit: 20,
 		playerMinMassForEject: 20,
 		playerMaxMass: 20000,
@@ -522,7 +523,7 @@ Server.prototype.getLeaders = function() {
 		for(var j = 0; j < player.blobs.length; j++) {
 			sum += player.blobs[j].mass;
 		};
-		var nick = player.getNick() == ""? "Unnamed" : player.getNick();
+		var nick = player.getNick();
 		masses.push({
 			nick: nick,
 			mass: sum
@@ -741,7 +742,10 @@ io.on("connection", function(socket) {
 			0, null, player);
 
 		player.isJoined = true;
-		socket.emit("joined");	
+		socket.emit("joined");
+
+		var d = ["game", "", `${player.getNick()} joined the game.`];
+		socket.broadcast.emit("msg", d);
 
 
 		var init = [];
@@ -759,6 +763,9 @@ io.on("connection", function(socket) {
 	});
 
 	socket.on("disconnect", function() {
+		var d = ["game", "", `${player.getNick()} left the game.`];
+		socket.broadcast.emit("msg", d);
+		
 		delete sockets[socket.id];
 		var index = server.players.indexOf(player);
 		if(index > -1) {
@@ -788,6 +795,11 @@ io.on("connection", function(socket) {
 	});
 
 	
+	socket.on("msg", function(m) {
+		var d = ["client", player.getNick(), m];
+		io.sockets.emit("msg", d);
+	});
+
 
 });
 
