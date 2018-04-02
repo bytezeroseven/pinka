@@ -22,6 +22,8 @@ function Blob(server, nodeId, x, y, mass, parent) {
 	this.server = server;
 	this.nodeId = nodeId;
 	this.nodeType = -1; // 0- playerBlob, 1- food, 2-eject, 3-virus
+	this.isAgitated = false;
+	this.sendId = Math.random();
 	
 	this.x = x;
 	this.y = y;
@@ -62,12 +64,12 @@ Blob.prototype.setBoost = function(angle) {
 Blob.prototype.getBoostAngle = function() {
 	return this.boostEngine.angle;
 };
-Blob.prototype.boostMove = function() {
-	this.x += this.boostEngine.x;
-	this.y += this.boostEngine.y;
+Blob.prototype.boostMove = function(delta) {
+	this.x += this.boostEngine.x * delta;
+	this.y += this.boostEngine.y * delta;
 
-	this.boostEngine.x *= 0.95;
-	this.boostEngine.y *= 0.95;
+	this.boostEngine.x -= this.boostEngine.x * 0.05 * delta;
+	this.boostEngine.y -= this.boostEngine.y * 0.05 * delta;
 };
 Blob.prototype.isBoosting = function() {
 	return Math.hypot(this.boostEngine.x, this.boostEngine.y) > 15
@@ -106,14 +108,14 @@ function PlayerBlob() {
 	this.nodeType = 0;
 };
 PlayerBlob.prototype = new Blob();
-PlayerBlob.prototype.move = function() {
+PlayerBlob.prototype.move = function(delta) {
 	var mouse = this.parent.getMouse(this.x, this.y);
 	var angle = mouse.angle;
 	var vx = mouse.vx / (this.getSize() * 0.11);
 	var vy = mouse.vy / (this.getSize() * 0.11);
 	var speed = this.getSpeed();
-	this.x += Math.cos(angle) * speed * Math.min(Math.pow(vx, 2), 1);
-	this.y += Math.sin(angle) * speed * Math.min(Math.pow(vy, 2), 1);
+	this.x += Math.cos(angle) * speed * Math.min(Math.pow(vx, 2), 1) * delta;
+	this.y += Math.sin(angle) * speed * Math.min(Math.pow(vy, 2), 1) * delta;
 };
 PlayerBlob.prototype.eat = function() {
 	var nodes = this.server.getNodesInRange(this.x, this.y);
@@ -131,7 +133,7 @@ PlayerBlob.prototype.eat = function() {
 	};
 };
 PlayerBlob.prototype.canCombine = function() {
-	var baseTime = 20000;
+	var baseTime = 60000;
 	var required = 0.15 * this.mass + baseTime;
 	return Date.now() - this.time >= required;
 };
@@ -139,6 +141,7 @@ PlayerBlob.prototype.canCombine = function() {
 function Virus() {
 	Blob.apply(this, arguments);
 	this.nodeType = 1;
+	this.isAgitated = true;
 };
 Virus.prototype = new Blob();
 Virus.prototype.onEat = function(prey) {
@@ -246,6 +249,13 @@ function Player(server) {
 	this.server = server;
 	this.blobs = [];
 
+	this.visibleNodes = this.server.getNodesInRange(0, 0);
+	this.movingVisibleNodes = this.visibleNodes.filter(function(n) {
+		return n.nodeType == 0 || n.nodeType == 1 || n.nodeType == 3;
+	});
+	this.addedVisibleNodes = [];
+	this.removedVisibleNodes = [];
+
 	this.nick = "";
 
 	this.drawZoom = 1;
@@ -267,14 +277,12 @@ Player.prototype.setNick = function(n) {
 Player.prototype.getNick = function() {
 	return this.nick;
 };
-Player.prototype.onMouseMove = function(e) {
-	this.rawMouseX = e.clientX;
-	this.rawMouseY = e.clientY;
+Player.prototype.onMouseMove = function(x, y) {
+	this.rawMouseX = x;
+	this.rawMouseY = y;
 };
 
-Player.prototype.onKeyDown = function(e) {
-	var key = e.keyCode;
-
+Player.prototype.onKeyDown = function(key) {
 	if(key == 87) {
 		var len = this.blobs.length;
 		for(var i = 0; i < len; i++) {
@@ -290,8 +298,7 @@ Player.prototype.onKeyDown = function(e) {
 		};
 	}
 };
-Player.prototype.onKeyUp = function(e) {
-	var key = e.keyCode;
+Player.prototype.onKeyUp = function(key) {
 	// ???
 };
 Player.prototype.getMouse = function(x, y) {
@@ -306,7 +313,7 @@ Player.prototype.getMouse = function(x, y) {
 	};
 };
 
-Player.prototype.updateCenter = function() {
+Player.prototype.updateCenter = function(delta) {
 	var totalX = 0, 
 		totalY = 0, 
 		totalSize = 0;
@@ -328,9 +335,23 @@ Player.prototype.updateCenter = function() {
 	this.centerY = totalY / len;
 	this.drawZoom = 1 / (Math.sqrt(totalSize) / Math.log(totalSize));
 
-	this._centerX += (this.centerX - this._centerX) * 0.2;
-	this._centerY += (this.centerY - this._centerY) * 0.2;
-	this._drawZoom += (this.drawZoom - this._drawZoom) * 0.2;
+	var nodes = this.server.getNodesInRange(this.centerX, this.centerY);
+	var self = this;
+	nodes.forEach(function(n, i) {
+		if(self.visibleNodes.indexOf(n) == -1) {
+			self.addedVisibleNodes.push(n);
+			self.visibleNodes.push(n);
+		}
+		self.visibleNodes.forEach(function(m, j) {
+			if(nodes.indexOf(m) == -1) {
+				self.removedVisibleNodes.push(m);
+				self.visibleNodes.splice(j, 1);
+			}
+		});
+	});
+	this.movingVisibleNodes = nodes.filter(function(n) {
+		return n.nodeType == 0 || n.nodeType == 1 || n.nodeType == 3;
+	});
 };
 
 
@@ -347,7 +368,7 @@ function Server() {
 		ejectMass: 10,
 		foodMass: 5,
 
-		playerStartMass: 1000,
+		playerStartMass: 100,
 		playerMinMassForSplit: 20,
 		playerMinMassForEject: 20,
 		playerMaxMass: 20000,
@@ -514,10 +535,16 @@ Server.prototype.getLeaders = function() {
 		return c.nick;
 	});
 };
+Server.prototype.lastUpdateTime = Date.now();
+Server.prototype.getDelta = function() {
+	return Date.now() - this.lastUpdateTime;
+};
 Server.prototype.update = function() {
-	for(var i = 0; i < this.players.length; i++) {
+	var currDelta = this.getDelta() / 16; // For making the speed right
+
+    for(var i = 0; i < this.players.length; i++) {
 		var player = this.players[i];
-		player.updateCenter();
+		player.updateCenter(currDelta);
 
 		for(var x = 0; x < player.blobs.length; x++) {
 			var blob = player.blobs[x];
@@ -532,12 +559,10 @@ Server.prototype.update = function() {
 					blob, blob.parent);
 			};
 
-			blob._mass += (blob.mass - blob._mass) * animationK;
-			
 			blob.borderCheck();
-			blob.move();
-			blob.boostMove();
 			blob.eat();
+			blob.move(currDelta);
+			blob.boostMove(currDelta);
 		};
 
 		for(var j = 0; j < player.blobs.length; j++) {
@@ -546,7 +571,7 @@ Server.prototype.update = function() {
 				var blobB = player.blobs[k];
 
 				if(k != j) {
-					this.collisionHandler.pushApart(blobA, blobB);
+					this.collisionHandler.pushApart(blobA, blobB, currDelta);
 					this.collisionHandler.combinePlayer(blobA, blobB);
 				}
 			};
@@ -556,17 +581,14 @@ Server.prototype.update = function() {
 	for(var i = 0; i < this.nodes.length; i++) {
 		var node = this.nodes[i];
 
-		node._mass += (node.mass - node._mass) * animationK;
-		
 		node.borderCheck();
-		node.boostMove();
 		node.eat();
-		node.move();
+		node.boostMove(currDelta);
+		node.move(currDelta);
 	};
+
+	this.lastUpdateTime = Date.now();
 };
-
-
-var animationK = 0.1;
 
 
 
@@ -622,7 +644,7 @@ CollisionHandler.prototype.canEat = function(eater, check) {
 	
 	
 };
-CollisionHandler.prototype.pushApart = function(blobA, blobB) {
+CollisionHandler.prototype.pushApart = function(blobA, blobB, delta) {
 	if(!blobA || !blobB) {
 		return;
 	}
@@ -651,10 +673,10 @@ CollisionHandler.prototype.pushApart = function(blobA, blobB) {
 	var canCombine = blobA.canCombine() && blobB.canCombine();
 
 	if(!isBoosting && !canCombine) {
-		blobA.x -= px * impulseB * animationK;
-		blobA.y -= py * impulseB * animationK;
-		blobB.x += px * impulseA * animationK;
-		blobB.y += py * impulseA * animationK;
+		blobA.x -= px * impulseB * 0.1 * delta;
+		blobA.y -= py * impulseB * 0.1 * delta;
+		blobB.x += px * impulseA * 0.1 * delta;
+		blobB.y += py * impulseA * 0.1 * delta;
 	} else {
 		return false;
 	}
@@ -704,12 +726,13 @@ io.on("connection", function(socket) {
 	//var player = server.createPlayer(socket.id, "𐍃𐌄𐌗", "");
 	var player = new Player(server);
 	player.id = socket.id;
+	player.isJoined = false;
 	server.players.push(player);
 
 
 
 	socket.on("join game", function(d) {
-		player.setNick(d.nick);
+		player.setNick(d[0]);
 
 		var b  = server.createPlayerBlob(
 			Math.random() * server.config.width,
@@ -717,7 +740,22 @@ io.on("connection", function(socket) {
 			server.config.playerStartMass,
 			0, null, player);
 
-		socket.emit("joined");
+		player.isJoined = true;
+		socket.emit("joined");	
+
+
+		var init = [];
+
+		player.visibleNodes.forEach(function(b) {
+			init.push([
+				b.sendId,
+	 			Math.round(b.x),
+	 			Math.round(b.y),
+	 			b.nick,
+	 			Math.round(Math.sqrt(b.mass) * 10),
+	 			Math.round(b.hue)]);
+		})
+		socket.emit("init blobs", init);
 	});
 
 	socket.on("disconnect", function() {
@@ -735,12 +773,12 @@ io.on("connection", function(socket) {
 
 
 	socket.on("width and height", function(d) {
-		player.screenWidth = d.w;
-		player.screenHeight = d.h;
-	})
+		player.screenWidth = d[0];
+		player.screenHeight = d[1];
+	});
 
 	socket.on("input mouse", function(data) {
-		player.onMouseMove(data);
+		player.onMouseMove(data[0], data[1]);
 	});
 	socket.on("input keyup", function(data) {
 		player.onKeyUp(data);
@@ -754,55 +792,111 @@ io.on("connection", function(socket) {
 });
 
 
-
 setInterval(function() {
 	
 	server.update();
 
 	for(var key in sockets) {
 		var socket = sockets[key];
-		var player = server.players.filter(function(p) {
-			return p.id == socket.id
-		})[0];
+		var player = server.players.find(function(p) {
+			return p.id == socket.id;
+		});
+
+		var add = [];
+
+		player.addedVisibleNodes.forEach(function(b) {
+			/*add.push({
+				sendId: b.sendId,
+	 			x: Math.round(b.x), 
+	 			y: Math.round(b.y),
+	 			nick: b.nick,
+	 			size: Math.round(Math.sqrt(b._mass) * 10),
+	 			hue: Math.round(b.hue)
+			});*/
+			add.push([
+				b.sendId,
+	 			Math.round(b.x),
+	 			Math.round(b.y),
+	 			b.nick,
+	 			Math.round(Math.sqrt(b.mass) * 10),
+	 			Math.round(b.hue),
+	 			b.isAgitated]);
+		});
+
+		socket.emit("add blobs", add);
+		player.addedVisibleNodes = [];
+
+		var remove = [];
+
+		player.removedVisibleNodes.forEach(function(b) {
+			remove.push(b.sendId);
+		});
+
+		socket.emit("remove blobs", remove);
+		player.removedVisibleNodes = [];
 
 
-		var package = [];
-	 	var blobs = server.getNodesInRange(player.centerX, player.centerY);
+		var move = [];
+		player.movingVisibleNodes.forEach(function(b) {
+			/*move.push({
+				sendId: b.sendId,
+	 			x: Math.round(b.x), 
+	 			y: Math.round(b.y),
+	 			size: Math.round(Math.sqrt(b._mass) * 10)
+			});*/
+			move.push([
+				b.sendId,
+	 			Math.round(b.x),
+	 			Math.round(b.y),
+	 			Math.round(Math.sqrt(b.mass) * 10)]);
+		});
 
-	 	for(var i = 0; i < blobs.length; i++) {
+		socket.emit("move blobs", move);
+
+
+
+		// var package = [];
+	 	// var blobs = server.getNodesInRange(player.centerX, player.centerY);
+
+	 	/*for(var i = 0; i < blobs.length; i++) {
 	 		var b = blobs[i];
+	 		package.push([
+	 			Math.round(b.x),
+	 			Math.round(b.y),
+	 			b.nick,
+	 			Math.round(Math.sqrt(b._mass) * 10),
+	 			Math.round(b.hue)])
 	 		package.push({
+	 			sendId: b.sendId,
 	 			x: b.x, 
 	 			y: b.y,
 	 			nick: b.nick,
 	 			size: Math.sqrt(b._mass) * 10,
 	 			hue: b.hue
 	 		});
-	 	};
+	 	};*/
 
 
 
-	 	socket.emit("update blobs", package);
+	 	// socket.emit("update blobs", package);
 	 	socket.emit("leaders", server.getLeaders());
 		
-	 	if(player.blobs.length == 0) {
+	 	if(player.blobs.length == 0 && player.isJoined == true) {
 	 		socket.emit("dead");
+	 		player.isJoined = false;
 	 		continue;
 	 	}
 
-		var translateX = player._centerX * player._drawZoom - player.screenWidth / 2;
-		var translateY = player._centerY * player._drawZoom - player.screenHeight / 2;
+		var translateX = player.centerX * player.drawZoom - player.screenWidth / 2;
+		var translateY = player.centerY * player.drawZoom - player.screenHeight / 2;
 
 		
-		socket.emit("center and zoom", {
-			centerX: translateX,
-			centerY: translateY,
-			zoom: player._drawZoom
-		});
+		var d = [Math.round(translateX), Math.round(translateY), player.drawZoom];
+		socket.emit("center and zoom", d);
 
 
 	}
-}, 1000/60);
+}, 1000/20);
 
 
 

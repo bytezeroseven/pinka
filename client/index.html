@@ -76,12 +76,13 @@
     <canvas id="gameCanvas"></canvas>
     <div id="overlay">
         <div id="container">
-          <h2>Hello!</h2>
-          <p>Type a nick below or leave it empty.</p>
+            <h2>Hello!</h2>
+            <p>Type a nick below or leave it empty.</p>
         <input type="text" id="nickInput" placeholder="Nick" maxlength="14">
-          <button id="playButton">Play</button>
-          <hr>
-          <center><p>spacebar for split<br>w for eject</p></center>
+            <button id="playButton">Play</button>
+            <center>
+                <p>spacebar for split<br>w for eject</p>
+            </center>
         </div>
     </div>
     <script src="/socket.io/socket.io.js"></script>
@@ -98,14 +99,22 @@
 
         var socket = io();
 
-        socket.emit("width and height", {
-            w: width,
-            h: height
-        });
+        var d = [width, height];
+        socket.emit("width and height", d);
 
 
 
-        var blobs = [];
+
+
+
+
+
+
+
+
+
+
+        
         function drawBlob(b) {
 
             var r = b.size;
@@ -116,6 +125,23 @@
             ctx.beginPath();
             ctx.arc(0, 0, r, 0, Math.PI * 2);
             ctx.closePath();
+
+            if(b.isAgitated) {
+                var n = 100;
+                ctx.beginPath();
+                for(var i = 0; i < n; i++) {
+                    var e = r * 0.03;
+                    var extra = i % 2 == 0 ? e : -e;
+                    var a = i / n * Math.PI * 2;
+
+                    
+                    ctx.lineTo(
+                        Math.cos(a) * (r + extra), 
+                        Math.sin(a) * (r + extra)
+                    );
+                };
+                ctx.closePath();
+            }
 
             ctx.fillStyle = "hsl(" + b.hue + ", 100%, 60%)";
             //ctx.strokeStyle = "hsl(" + b.hue + ", 100%, 50%)";
@@ -144,7 +170,7 @@
             ctx.textAlign = "center";
 
 
-            var fontsize = size * 0.34;
+            var fontsize = size * 0.43;
             do {
                 fontsize--;
                 ctx.font = fontsize + "px Arial";
@@ -191,10 +217,8 @@
         }
 
         window.addEventListener("mousemove", function(e) {
-            socket.emit("input mouse", {
-                clientX: e.clientX,
-                clientY: e.clientY
-            });
+            var d = [e.clientX, e.clientY];
+            socket.emit("input mouse", d);
         });
 
         var pressed = false;
@@ -204,32 +228,100 @@
             } else {
                 return;
             }
-            socket.emit("input keydown", {
-                keyCode: e.keyCode
-            });
+            socket.emit("input keydown", e.keyCode);
         });
         window.addEventListener("keyup", function(e) {
             pressed = false;
-            socket.emit("input keyup", {
-                keyCode: e.keyCode
+            socket.emit("input keyup", e.keyCode);
+        });
+
+
+        function addBlob(arr) {
+            blobs.push({
+                sendId: arr[0],
+                x: arr[1],
+                y: arr[2],
+                nick: arr[3],
+                size: arr[4],
+                hue: arr[5],
+                isAgitated: arr[6],
+                
+                newX: arr[1],
+                newY: arr[2],
+                newSize: arr[4]
+            });
+        };
+
+
+        var blobs = [];
+        socket.on("init blobs", function(d) {
+            // blobs = d;
+            blobs = [];
+            d.forEach(function(arr) {
+                addBlob(arr);
             });
         });
 
+        
 
-
-        socket.on("update blobs", function(data) {
-            blobs = data;
+        socket.on("add blobs", function(d) {
+            // blobs = blobs.concat(d);
+            d.forEach(function(arr) {
+                addBlob(arr);
+            });
         });
+
+        socket.on("remove blobs", function(d) {
+            d.forEach(function(id) {
+                var index = blobs.findIndex(function(a) {
+                    return a.sendId == id;
+                });
+
+                blobs.splice(index, 1);
+            })
+        });
+
+        socket.on("move blobs", function(d) {
+            d.forEach(function(arr) {
+                var blob = blobs.find(function(a) {
+                    return a.sendId == arr[0];
+                });
+                if(blob) {
+                    blob.newX = arr[1];
+                    blob.newY = arr[2];
+                    blob.newSize = arr[3];
+                }
+            })
+        });
+
+
+        /*socket.on("update blobs", function(data) {
+            blobs = data;
+            data.forEach(function(d) {
+                blobs.forEach(function(b) {
+                    if(b.sendId == d.sendId) {
+                        b.x = d.x;
+                        b.y = d.y;
+                    } else {
+                        blobs.push(d);
+                    }
+                });
+            });
+        });*/
 
 
         var tX = 0;
         var tY = 0;
         var z = 0.4;
 
+        var newtX = 0;
+        var newtY = 0;
+        var newz = 0.4;
+
         socket.on("center and zoom", function(d) {
-            tX = d.centerX;
-            tY = d.centerY;
-            z = d.zoom;
+            newtX = d[0];
+            newtY = d[1];
+            newz = d[2];
         });
 
         socket.on("dead", function() {
@@ -250,9 +342,8 @@
             if(nick != "") {
                 document.getElementById("overlay").style.display = "none";
 
-                socket.emit("join game", {
-                    nick: nick,
-                });
+                var d = [nick];
+                socket.emit("join game", d);
             }
 
         };
@@ -265,28 +356,29 @@
             leaders = d;
         });
 
-        
+        function gridPattern() {
+            var c = document.createElement("canvas");
+            c.width = 128;
+            c.height = 128;
+            c.ctx = c.getContext("2d");
+            c.ctx.fillStyle = "#000";
+            c.ctx.globalAlpha = 0.1;
+            c.ctx.fillRect(0, c.width/2, c.width, 5);
+            c.ctx.fillRect(c.width/2, 0, 5, c.width);
+            return ctx.createPattern(c, "repeat");
+        }; 
 
         function draw() {
             ctx.clearRect(0, 0, width, height);
 
             ctx.save();
-        
+    
+            tX += (newtX - tX) * 0.2;  
+            tY += (newtY - tY) * 0.2;
+            z += (newz - z) * 0.2;    
 
             ctx.translate(-tX, -tY);
-            ctx.scale(z, z);
-
-            function gridPattern() {
-                var c = document.createElement("canvas");
-                c.width = 128;
-                c.height = 128;
-                c.ctx = c.getContext("2d");
-                c.ctx.fillStyle = "#000";
-                c.ctx.globalAlpha = 0.1;
-                c.ctx.fillRect(0, c.width/2, c.width, 5);
-                c.ctx.fillRect(c.width/2, 0, 5, c.width);
-                return ctx.createPattern(c, "repeat");
-            };  
+            ctx.scale(z, z); 
 
             ctx.fillStyle = gridPattern();
             ctx.fillRect(
@@ -299,8 +391,12 @@
                 return a.size - b.size;
             });
 
-            for(var i in blobs) {
+            for(var i = 0; i < blobs.length; i++) {
                 var b = blobs[i];
+                b.x += (b.newX - b.x) * 0.2;
+                b.y += (b.newY - b.y) * 0.2;
+                b.size += (b.newSize - b.size) * 0.2;
+                
                 drawBlob(b);
             }
 
