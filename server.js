@@ -22,6 +22,7 @@ function Blob(server, nodeId, x, y, mass, parent) {
 	this.server = server;
 	this.nodeId = nodeId;
 	this.nodeType = -1; // 0- playerBlob, 1- food, 2-eject, 3-virus
+	this.team = null;
 	this.isAgitated = false;
 	this.sendId = Math.random();
 	
@@ -44,6 +45,7 @@ function Blob(server, nodeId, x, y, mass, parent) {
 		angle: 0
 	};
 };
+
 Blob.prototype.getSpeed = function() {
 	return 15 * 1.6 / Math.pow(this.mass, 0.32);
 };
@@ -108,6 +110,9 @@ function PlayerBlob() {
 	this.nodeType = 0;
 };
 PlayerBlob.prototype = new Blob();
+PlayerBlob.prototype.decayMass = function(delta) {
+	this.mass -= this.mass * 0.00005 * delta;
+};
 PlayerBlob.prototype.move = function(delta) {
 	var mouse = this.parent.getMouse(this.x, this.y);
 	var angle = mouse.angle;
@@ -133,8 +138,7 @@ PlayerBlob.prototype.eat = function() {
 	};
 };
 PlayerBlob.prototype.canCombine = function() {
-	var baseTime = 60000;
-	var required = 0.15 * this.mass + baseTime;
+	var required = 0.15 * this.mass + this.server.config.baseTime;
 	return Date.now() - this.time >= required;
 };
 
@@ -175,14 +179,14 @@ Virus.prototype.onEaten = function(eater) {
 	if(numSplits <= 0) return;
 
 	var massLeft = eater.mass;
-	if (massLeft < 266) {
+	if (massLeft < 466) {
 		var splitAmount = 1;
-		while (massLeft > 0) {
+		while (massLeft > 36) {
     		splitAmount *= 2;
     		massLeft = eater.mass - splitAmount * 36;
 		};
 		var splitMass = eater.mass / splitAmount;
-		for (var i = 0; i < Math.min(splitAmount, numSplits); i++) {
+		for(var i = 0; i < Math.min(splitAmount, numSplits); i++) {
     		var angle = Math.random() * 6.28;
    		 	if (eater.mass <= 36) {
    		 		break;
@@ -239,20 +243,23 @@ function Eject() {
 	this.nodeType = 3;
 };
 Eject.prototype = new Blob();
+/* self feed
 
+Eject.prototype.onEaten = function(eater) {
+	Blob.prototype.onEaten.apply(this, arguments);
+	eater.mass += this.mass * 0.343;
+};
+*/
 
 
 
 
 function Player(server) {
-	this.id = Math.random();
 	this.server = server;
 	this.blobs = [];
 
-	this.visibleNodes = this.server.getNodesInRange(0, 0);
-	this.movingVisibleNodes = this.visibleNodes.filter(function(n) {
-		return n.nodeType == 0 || n.nodeType == 1 || n.nodeType == 3;
-	});
+	this.visibleNodes = [];
+	this.movingVisibleNodes = [];
 	this.addedVisibleNodes = [];
 	this.removedVisibleNodes = [];
 
@@ -261,10 +268,6 @@ function Player(server) {
 	this.drawZoom = 1;
 	this.centerX = 0;
 	this.centerY = 0;
-
-	this._drawZoom = 1;
-	this._centerX = 0;
-	this._centerY = 0;
 
 	this.rawMouseX = 0;
 	this.rawMouseY = 0;
@@ -336,6 +339,7 @@ Player.prototype.updateCenter = function(delta) {
 	this.drawZoom = 1 / (Math.sqrt(totalSize) / Math.log(totalSize));
 
 	var nodes = this.server.getNodesInRange(this.centerX, this.centerY);
+
 	var self = this;
 	nodes.forEach(function(n, i) {
 		if(self.visibleNodes.indexOf(n) == -1) {
@@ -369,7 +373,7 @@ function Server() {
 		ejectMass: 10,
 		foodMass: 5,
 
-		playerStartMass: 1000,
+		playerStartMass: 1302,
 		playerMinMassForSplit: 20,
 		playerMinMassForEject: 20,
 		playerMaxMass: 20000,
@@ -377,8 +381,10 @@ function Server() {
 		rangeWidth: 5000,
 		rangeHeight: 5000,
 
-		width: 10000,
-		height: 10000
+		baseTime: 60000,
+
+		width: 14000,
+		height: 14000
 	};
 };
 Server.prototype.createPlayer = function(id, nick) {
@@ -482,6 +488,12 @@ Server.prototype.addEject = function(blob) {
 	ejectBlob.setBoost(angle);
 	this.nodes.push(ejectBlob);
 };
+Server.prototype.removePlayer = function(player) {
+	var index = this.players.indexOf(player);
+	if(index > -1) {
+		this.players.splice(index, 1);
+	}
+};
 Server.prototype.removeNode = function(node) {
 	if(node.nodeType != 0) {
 		this.nodes.splice(node.nodeId, 1);
@@ -562,6 +574,7 @@ Server.prototype.update = function() {
 
 			blob.borderCheck();
 			blob.eat();
+			blob.decayMass(currDelta);
 			blob.move(currDelta);
 			blob.boostMove(currDelta);
 		};
@@ -707,33 +720,67 @@ CollisionHandler.prototype.combinePlayer = function(blobA, blobB) {
 
 
 
+/*var servers = {
+	ffa: new Server(),
+	instant: new Server()
+};
 
+servers.instant.config.playerMaxSplit = 32;
+servers.instant.config.baseTime = 700;
+
+for(var i in servers) {
+	var mode = servers[i];
+	mode.addFood(1000);
+	mode.addVirus(30);
+};
+*/
 
 var server = new Server();
-server.addFood(250);
-server.addVirus(10);
-
+server.addFood(1000);
+server.addVirus(30);
 
 var sockets = {};
 
 
-var init = [];
-var update = [];
+function escapeHtml(unsafe) {
+    return unsafe
+         .replace(/&/g, "&amp;")
+         .replace(/</g, "&lt;")
+         .replace(/>/g, "&gt;")
+         .replace(/"/g, "&quot;")
+         .replace(/'/g, "&#039;");
+};
 
 
 io.on("connection", function(socket) {
+	// var player = server.createPlayer(socket.id, "𐍃𐌄𐌗", "");
 	sockets[socket.id] = socket;
-	
-	//var player = server.createPlayer(socket.id, "𐍃𐌄𐌗", "");
+
 	var player = new Player(server);
+	player.joined = false;
 	player.id = socket.id;
-	player.isJoined = false;
 	server.players.push(player);
 
-
-
 	socket.on("join game", function(d) {
-		player.setNick(d[0]);
+		if(socket.joined) {
+			return;
+		}
+
+		var servKey = d[0];
+		var nick = d[1];
+
+		// player.server = servers[key];
+
+		player.setNick(nick);
+
+		player.joined = true;
+		socket.emit("joined");
+
+		socket.on("msg", function(m) {
+			var d = ["client", escapeHtml(player.getNick()), escapeHtml(m)];
+			io.sockets.emit("msg", d);
+		});
+		
 
 		var b  = server.createPlayerBlob(
 			Math.random() * server.config.width,
@@ -741,11 +788,10 @@ io.on("connection", function(socket) {
 			server.config.playerStartMass,
 			0, null, player);
 
-		player.isJoined = true;
-		socket.emit("joined");
+		
 
-		var d = ["game", "", `${player.getNick()} joined the game.`];
-		socket.broadcast.emit("msg", d);
+		var m = ["game", "", `${ escapeHtml(player.getNick()) } joined the game.`];
+		socket.broadcast.emit("msg", m);
 
 
 		var init = [];
@@ -757,33 +803,31 @@ io.on("connection", function(socket) {
 	 			Math.round(b.y),
 	 			b.nick,
 	 			Math.round(Math.sqrt(b.mass) * 10),
-	 			Math.round(b.hue)]);
+	 			Math.round(b.hue),
+	 			b.isAgitated,
+	 			b.nodeType]);
 		})
 		socket.emit("init blobs", init);
+
+
+		console.log("connected");
+		console.log("players: " + server.players.length);
+
+
 	});
 
 	socket.on("disconnect", function() {
-		var d = ["game", "", `${player.getNick()} left the game.`];
+		var d = ["game", "", `${escapeHtml(player.getNick())} left the game.`];
 		socket.broadcast.emit("msg", d);
-		
+
 		delete sockets[socket.id];
-		var index = server.players.indexOf(player);
-		if(index > -1) {
-			server.players.splice(index, 1)
-		}
-	})
-
-
-
-	console.log("connected");
-	console.log("players: " + server.players.length);
-
+		player.server.removePlayer(player);
+	});
 
 	socket.on("width and height", function(d) {
 		player.screenWidth = d[0];
 		player.screenHeight = d[1];
 	});
-
 	socket.on("input mouse", function(data) {
 		player.onMouseMove(data[0], data[1]);
 	});
@@ -794,37 +838,29 @@ io.on("connection", function(socket) {
 		player.onKeyDown(data);
 	});
 
-	
-	socket.on("msg", function(m) {
-		var d = ["client", player.getNick(), m];
-		io.sockets.emit("msg", d);
-	});
-
 
 });
 
 
 setInterval(function() {
+	/*for(var i in servers) {
+		var server = servers[i];
+		server.update();
+	};*/
 	
 	server.update();
 
 	for(var key in sockets) {
 		var socket = sockets[key];
-		var player = server.players.find(function(p) {
-			return p.id == socket.id;
+
+
+		var player = server.players.find(function(a) {
+			return a.id == socket.id;
 		});
 
 		var add = [];
 
 		player.addedVisibleNodes.forEach(function(b) {
-			/*add.push({
-				sendId: b.sendId,
-	 			x: Math.round(b.x), 
-	 			y: Math.round(b.y),
-	 			nick: b.nick,
-	 			size: Math.round(Math.sqrt(b._mass) * 10),
-	 			hue: Math.round(b.hue)
-			});*/
 			add.push([
 				b.sendId,
 	 			Math.round(b.x),
@@ -832,7 +868,8 @@ setInterval(function() {
 	 			b.nick,
 	 			Math.round(Math.sqrt(b.mass) * 10),
 	 			Math.round(b.hue),
-	 			b.isAgitated]);
+	 			b.isAgitated,
+	 			b.nodeType]);
 		});
 
 		socket.emit("add blobs", add);
@@ -850,12 +887,6 @@ setInterval(function() {
 
 		var move = [];
 		player.movingVisibleNodes.forEach(function(b) {
-			/*move.push({
-				sendId: b.sendId,
-	 			x: Math.round(b.x), 
-	 			y: Math.round(b.y),
-	 			size: Math.round(Math.sqrt(b._mass) * 10)
-			});*/
 			move.push([
 				b.sendId,
 	 			Math.round(b.x),
@@ -864,38 +895,11 @@ setInterval(function() {
 		});
 
 		socket.emit("move blobs", move);
-
-
-
-		// var package = [];
-	 	// var blobs = server.getNodesInRange(player.centerX, player.centerY);
-
-	 	/*for(var i = 0; i < blobs.length; i++) {
-	 		var b = blobs[i];
-	 		package.push([
-	 			Math.round(b.x),
-	 			Math.round(b.y),
-	 			b.nick,
-	 			Math.round(Math.sqrt(b._mass) * 10),
-	 			Math.round(b.hue)])
-	 		package.push({
-	 			sendId: b.sendId,
-	 			x: b.x, 
-	 			y: b.y,
-	 			nick: b.nick,
-	 			size: Math.sqrt(b._mass) * 10,
-	 			hue: b.hue
-	 		});
-	 	};*/
-
-
-
-	 	// socket.emit("update blobs", package);
 	 	socket.emit("leaders", server.getLeaders());
 		
-	 	if(player.blobs.length == 0 && player.isJoined == true) {
+	 	if(player.blobs.length == 0 && player.joined == true) {
 	 		socket.emit("dead");
-	 		player.isJoined = false;
+	 		socket.joined = false;
 	 		continue;
 	 	}
 
@@ -905,8 +909,6 @@ setInterval(function() {
 		
 		var d = [Math.round(translateX), Math.round(translateY), player.drawZoom];
 		socket.emit("center and zoom", d);
-
-
 	}
 }, 1000/20);
 
